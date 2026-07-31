@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Memory Dashboard</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='80' font-size='80'>🧠</text></svg>">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; }
+  body { background:#0f1218; color:#d6dae3; font:14px/1.6 'JetBrains Mono',ui-monospace,monospace;
+         max-width:880px; margin:0 auto; padding:24px 20px; }
+  h1 { font-size:17px; color:#fff; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; }
+  h1 .muted { font-size:12px; font-weight:400; }
+  .muted { color:#7d8590; }
+  /* 종합 헬스 히어로 */
+  #hero { border-radius:12px; padding:22px 26px; margin-bottom:18px; display:flex; align-items:center; gap:18px;
+          border:1px solid; transition:background .3s; }
+  #hero.ok  { background:#12261a; border-color:#238636; }
+  #hero.warn{ background:#2b2111; border-color:#9e6a03; }
+  #hero.bad { background:#2d1214; border-color:#da3633; }
+  #hero .pulse { width:22px; height:22px; border-radius:50%; flex:none; }
+  #hero.ok  .pulse { background:#3fb950; box-shadow:0 0 0 0 #3fb95088; animation:pulse 2s infinite; }
+  #hero.warn .pulse { background:#d29922; }
+  #hero.bad .pulse { background:#f85149; animation:pulse 1s infinite; box-shadow:0 0 0 0 #f8514988; }
+  @keyframes pulse { 70% { box-shadow:0 0 0 12px transparent; } 100% { box-shadow:0 0 0 0 transparent; } }
+  #hero b { font-size:20px; display:block; }
+  #hero .why { font-size:12px; color:#9da7b3; margin-top:2px; }
+  /* 카드 그리드 */
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .card { background:#151a23; border:1px solid #232a36; border-radius:10px; padding:14px 16px; }
+  .card h2 { font-size:11px; text-transform:uppercase; letter-spacing:1px; color:#7d8590; margin-bottom:8px; }
+  .row { display:flex; justify-content:space-between; padding:2px 0; gap:10px; }
+  .row b { color:#e6edf3; font-weight:600; white-space:nowrap; }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:7px; }
+  .ok-d { background:#3fb950; } .bad-d { background:#f85149; }
+  .trend { color:#8bb4f7; font-size:13px; }
+  .wide { grid-column:1 / -1; }
+</style>
+</head>
+<body>
+<h1>🧠 Memory Dashboard <span class="muted" id="updated"></span></h1>
+
+<div id="hero"><div class="pulse"></div>
+  <div><b id="hero-title">확인 중…</b><div class="why" id="hero-why"></div></div>
+</div>
+
+<div class="grid">
+  <div class="card"><h2>서비스</h2><div id="services"></div></div>
+  <div class="card"><h2>훅 / 정책</h2><div id="hooks"></div></div>
+  <div class="card"><h2>Hindsight 뱅크</h2><div id="banks"></div></div>
+  <div class="card"><h2>기타 저장소</h2><div id="stores"></div></div>
+  <div class="card"><h2>파이프라인</h2><div id="activity"></div></div>
+  <div class="card"><h2>성능</h2><div id="perf"></div></div>
+  <div class="card wide"><h2>추이</h2><div id="trend" class="trend"></div></div>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const dot = ok => `<span class="dot ${ok ? "ok-d" : "bad-d"}"></span>`;
+let tick = 0;
+
+async function refresh() {
+  let d;
+  try {
+    const bench = (tick++ % 6 === 0) ? 1 : 0;   // 벤치는 1분에 1번
+    d = await (await fetch(`/api/summary?bench=${bench}`)).json();
+  } catch (e) {
+    setHero("bad", "대시보드 서버 응답 없음", "memdash-web 서비스 상태를 확인하세요");
+    return;
+  }
+  const h = d.health;
+
+  // ── 종합 Healthy 인디케이터 ──
+  const problems = [];
+  if (!h.hindsight.ok) problems.push("hindsight 데몬 다운");
+  if (!h.ollama.ok) problems.push("ollama 다운(추출 불가)");
+  if (h.hooks_wired !== 4) problems.push(`글로벌 훅 ${h.hooks_wired}/4`);
+  if (!h.am_plugin_disabled) problems.push("agentmemory 플러그인이 다시 활성화됨");
+  if (!h.agentmemory.ok) problems.push("아카이브(agentmemory) 다운");
+  if (d.activity.failed > 0) problems.push(`실패 작업 ${d.activity.failed}건`);
+  if (problems.length === 0)
+    setHero("ok", "HEALTHY", "모든 서비스 정상 · 훅 4/4 · 실패 작업 없음");
+  else if (h.hindsight.ok && h.hooks_wired === 4)
+    setHero("warn", "DEGRADED", problems.join(" · "));
+  else
+    setHero("bad", "UNHEALTHY", problems.join(" · "));
+
+  $("updated").textContent = "10초 주기 갱신 · " + d.ts.slice(11, 19);
+
+  $("services").innerHTML =
+    svc("hindsight :9077", h.hindsight) + svc("agentmemory :3111", h.agentmemory) +
+    svc(`ollama :11434 (${h.ollama.models} models)`, h.ollama);
+  $("hooks").innerHTML =
+    `<div class="row"><span>${dot(h.hooks_wired === 4)}글로벌 훅</span><b>${h.hooks_wired}/4</b></div>` +
+    `<div class="row"><span>${dot(h.am_plugin_disabled)}agentmemory 훅 비활성</span><b>${h.am_plugin_disabled ? "유지됨" : "재활성화됨!"}</b></div>`;
+  $("banks").innerHTML = d.banks.filter(b => b.nodes > 0).map(b =>
+    `<div class="row"><span>${b.id.replace("claude-code::", "")}</span>` +
+    `<b>${b.nodes}n · ${b.docs}docs</b></div>`).join("");
+  $("stores").innerHTML =
+    `<div class="row"><span>agentmemory 아카이브</span><b>${d.am_count}건</b></div>` +
+    `<div class="row"><span>네이티브 메모리</span><b>${d.native.projects}프로젝트 ${d.native.files}파일</b></div>`;
+
+  const a = d.activity;
+  let act = a.last_recall
+    ? `<div class="row"><span>마지막 recall</span><b>${a.last_recall.result_count}건 @${(a.last_recall.saved_at || "").slice(11, 16)}</b></div>` : "";
+  for (const s of a.sessions)
+    act += `<div class="row"><span>세션 ${s.sid}…</span><b>턴${s.turns} · retain까지 ${s.left}턴</b></div>`;
+  act += `<div class="row"><span>${dot(a.failed === 0)}실패 작업</span><b>${a.failed}건</b></div>`;
+  $("activity").innerHTML = act;
+
+  const p = d.perf;
+  $("perf").innerHTML =
+    (p.p50 !== null ? `<div class="row"><span>recall p50 / p95</span><b>${p.p50} / ${p.p95} ms</b></div>`
+                    : `<div class="row"><span class="muted">다음 벤치까지 대기</span></div>`) +
+    `<div class="row"><span>A/B 비교 로그</span><b>${p.ab_count}건</b></div>`;
+
+  const hist = d.history || [];
+  $("trend").innerHTML =
+    "nodes:&nbsp; " + hist.slice(-8).map(x => x.hs_nodes ?? "?").join(" → ") + "<br>" +
+    "archive: " + hist.slice(-8).map(x => x.am_count ?? "?").join(" → ") + "<br>" +
+    "p50(ms): " + hist.filter(x => x.p50).slice(-8).map(x => x.p50).join(" → ");
+}
+
+function svc(name, s) {
+  const ms = s.ms ? ` <span class="muted">${s.ms.toFixed(0)}ms</span>` : "";
+  return `<div class="row"><span>${dot(s.ok)}${name}</span><b>${s.ok ? "UP" : "DOWN"}${ms}</b></div>`;
+}
+function setHero(cls, title, why) {
+  $("hero").className = cls;
+  $("hero-title").textContent = title;
+  $("hero-why").textContent = why;
+}
+
+refresh();
+setInterval(refresh, 10000);
+</script>
+</body>
+</html>
