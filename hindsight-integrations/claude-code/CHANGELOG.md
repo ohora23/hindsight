@@ -4,6 +4,13 @@
 
 ### Added
 
+- `retainMaxInitialMessages` config (env: `HINDSIGHT_RETAIN_MAX_INITIAL_MESSAGES`,
+  default 300): caps the first retain of a session to the last N messages.
+  Previously the initial retain sent the entire transcript; for legacy
+  projects with 100MB+ histories the LLM extraction exceeded the server's
+  3600s retain wall-clock limit and the batch was cancelled. Set to 0 to
+  disable the cap. Later delta retains are unaffected.
+
 - `profile` setting (env: `HINDSIGHT_PROFILE`) with a `coding` preset that
   tunes grouped defaults for coding sessions: `retainToolCalls: true`,
   per-project dynamic banks (`dynamicBankId` + `["agent", "project"]`),

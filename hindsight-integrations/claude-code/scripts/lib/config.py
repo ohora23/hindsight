@@ -37,6 +37,7 @@ DEFAULTS = {
     "retainContext": "claude-code",
     "retainTags": [],
     "retainMetadata": {},
+    "retainMaxInitialMessages": 300,
     "recallAdditionalBanks": [],
     # Connection
     "hindsightApiUrl": None,
@@ -106,6 +107,7 @@ ENV_OVERRIDES = {
     "HINDSIGHT_AUTO_RECALL": ("autoRecall", bool),
     "HINDSIGHT_AUTO_RETAIN": ("autoRetain", bool),
     "HINDSIGHT_RETAIN_MODE": ("retainMode", str),
+    "HINDSIGHT_RETAIN_MAX_INITIAL_MESSAGES": ("retainMaxInitialMessages", int),
     "HINDSIGHT_RECALL_BUDGET": ("recallBudget", str),
     "HINDSIGHT_RECALL_MAX_TOKENS": ("recallMaxTokens", int),
     "HINDSIGHT_RECALL_MAX_QUERY_CHARS": ("recallMaxQueryChars", int),

@@ -132,6 +132,19 @@ def run_retain(hook_input: dict, force: bool = False) -> None:
             return
         messages_to_retain = all_messages[retention_progress.start_index :]
         retain_full_window = retention_progress.start_index == 0
+        # Cap the initial backfill. The first retain of a session sends the
+        # whole transcript; for a legacy project that can be a 100MB history
+        # whose LLM extraction blows the server's retain wall-clock limit
+        # (observed: 3600s exceeded -> batch cancelled). Recent context is
+        # what recall needs — keep the last N messages, skip the deep past.
+        # Later delta retains are unaffected.
+        max_initial = config.get("retainMaxInitialMessages", 300)
+        if retain_full_window and max_initial and len(messages_to_retain) > max_initial:
+            debug_log(
+                config,
+                f"Initial backfill capped: {len(messages_to_retain)} -> last {max_initial} messages",
+            )
+            messages_to_retain = messages_to_retain[-max_initial:]
         if retention_progress.compacted:
             debug_log(
                 config,

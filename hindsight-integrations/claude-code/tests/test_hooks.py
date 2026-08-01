@@ -411,6 +411,43 @@ class TestRetainHook:
         item = captured["body"]["items"][0]
         assert item["tags"] == ["sess-tag-test", "claude-code", "custom-tag"]
 
+    def test_initial_backfill_capped(self, monkeypatch, tmp_path):
+        """First retain of a large transcript keeps only the last N messages."""
+        messages = [{"role": "user" if i % 2 == 0 else "assistant", "content": f"msg-{i}"} for i in range(8)]
+        transcript = make_transcript_file(tmp_path, messages)
+        captured = {}
+
+        def capture(req, timeout=None):
+            if "/memories" in req.full_url and "/recall" not in req.full_url:
+                captured["body"] = json.loads(req.data.decode())
+            return FakeHTTPResponse({})
+
+        hook_input = make_hook_input(transcript_path=transcript, session_id="sess-backfill")
+        _run_hook(
+            "retain", hook_input, monkeypatch, tmp_path, urlopen_side_effect=capture,
+            extra_settings={"retainMaxInitialMessages": 4},
+        )
+
+        assert "body" in captured
+        content = captured["body"]["items"][0]["content"]
+        assert "msg-7" in content and "msg-4" in content
+        assert "msg-0" not in content and "msg-3" not in content
+
+    def test_initial_backfill_uncapped_below_limit(self, monkeypatch, tmp_path):
+        """Transcripts under the cap are retained in full."""
+        messages = [{"role": "user", "content": f"small-{i}"} for i in range(3)]
+        transcript = make_transcript_file(tmp_path, messages)
+        captured = {}
+
+        def capture(req, timeout=None):
+            if "/memories" in req.full_url and "/recall" not in req.full_url:
+                captured["body"] = json.loads(req.data.decode())
+            return FakeHTTPResponse({})
+
+        hook_input = make_hook_input(transcript_path=transcript, session_id="sess-small")
+        _run_hook("retain", hook_input, monkeypatch, tmp_path, urlopen_side_effect=capture)
+        assert "small-0" in captured["body"]["items"][0]["content"]
+
     def test_retain_tags_modified_files(self, monkeypatch, tmp_path):
         """Files touched by Write/Edit tool calls become file:<relpath> tags."""
         messages = [
